@@ -42,14 +42,22 @@ def load_info(url):
     return info
 
 
+class ImageInputError(ValueError):
+    """사용자에게 안내할 사진 입력 오류."""
+
+
 def prepare_image(raw):
     if len(raw) > 10 * 1024 * 1024:
-        raise ValueError("10MB 이하의 사진을 올려 주세요.")
+        raise ImageInputError("사진 파일이 10MB를 넘습니다. 파일 크기를 줄여 주세요.")
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(io.BytesIO(raw)) as source:
-            if source.width * source.height > 20_000_000:
-                raise ValueError("사진 해상도가 너무 큽니다. 크기를 줄여 주세요.")
+            if source.width * source.height > 60_000_000:
+                raise ImageInputError("사진이 6,000만 화소를 넘습니다. 해상도를 줄여 주세요.")
+            if source.format not in ("JPEG", "MPO", "PNG", "WEBP"):
+                raise ImageInputError("JPG·PNG·WebP 형식의 사진을 올려 주세요.")
+            # 휴대폰 JPEG/MPO는 작은 크기로 디코딩한 뒤 방향을 바로잡는다.
+            source.draft("RGB", (1024, 1024))
             photo = ImageOps.exif_transpose(source).convert("RGB")
             photo.thumbnail((1024, 1024))
             buffer = io.BytesIO()
@@ -92,8 +100,12 @@ with left:
         try:
             prepared = prepare_image(raw)
             st.image(prepared, caption=source_name, use_container_width=True)
-        except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-            st.error("사진을 읽을 수 없습니다. 10MB 이하의 JPG·PNG·WebP 사진을 올려 주세요.")
+        except ImageInputError as error:
+            st.error(str(error))
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+            st.error("사진 해상도가 너무 큽니다. 해상도를 줄여 주세요.")
+        except (ValueError, OSError, UnidentifiedImageError):
+            st.error("사진 파일을 읽을 수 없습니다. JPG·PNG·WebP로 다시 저장한 뒤 올려 주세요.")
     current_id = hashlib.sha256(prepared).hexdigest() if prepared else None
     if st.session_state.get("photo_id") != current_id:
         for key in ("result", "tokens", "draft_editor"):
